@@ -39,6 +39,7 @@ public class ChangeSetCreator {
             try {
                 new XMLOutputter(Format.getPrettyFormat())
                         .output(value, new FileWriter(new File(dir + File.separator + key + ".xml")));
+                System.out.printf("Generated file %s%s%s.xml%n", dir, File.separator, key);
             } catch (IOException e) {
                 e.printStackTrace();
             }
