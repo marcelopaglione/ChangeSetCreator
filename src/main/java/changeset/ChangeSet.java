@@ -4,10 +4,8 @@ import org.jdom2.Attribute;
 import org.jdom2.Document;
 import org.jdom2.Element;
 
-import javax.persistence.Column;
 import javax.persistence.Id;
 import javax.persistence.JoinColumn;
-import javax.validation.constraints.NotNull;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,56 +18,58 @@ public class ChangeSet {
     private List<Element> listFk;
     private List<Element> listPk;
     private Element databaseChangeLog;
-    private Element changeSet;
     private Element createTable;
     private String author;
     private Document doc;
 
-    public ChangeSet(Class c, String author) {
+    ChangeSet(Class clazz, String author) {
         this.author = author;
         doc = new Document();
         listFk = new ArrayList<>();
         listPk = new ArrayList<>();
-        setDatabaseChangeLogAttributes();
-        createNewTable(getValue(getLastValue(c)));
+        databaseChangeLog = new Element("databaseChangeLog");
+        createNewTable(getValue(Utils.getLastValue(clazz)));
     }
 
     private void createNewTable(String className) {
-        changeSet = new Element("changeSet")
+        Element changeSet = new Element("changeSet")
                 .setAttribute("id", className)
                 .setAttribute("author", author);
 
         createTable = new Element("createTable")
                 .setAttribute("tableName", className);
 
-
         changeSet.addContent(getPreconditions(className));
         changeSet.addContent(createTable);
         databaseChangeLog.setContent(changeSet);
     }
 
+    void createDatabaseColumns(boolean isUserData, Field[] fields) {
+        stream(fields).forEach(field -> {
+            Attribute[] attributes = {
+                    new Attribute("name", getAttributeName(isUserData, field)),
+                    new Attribute("type", getTypeName(isUserData, field))};
+            addColumn(Utils.isNotNull(field), attributes);
+            if (isUserData) addFk(field);
+            if (Utils.isPk(field)) addPk(field);
+        });
+    }
+
     private Element getPreconditions(String className) {
         return new Element("preConditions")
                 .setAttribute("onFail", "MARK_RAN")
-                .setAttribute("onFailMessage", String.format("A tabela %s já existe", className))
+                .setAttribute("onFailMessage", String.format("A tabela %s ja existe", className))
                 .setContent(new Element("not")
                         .setContent(new Element("tableExists")
                                 .setAttribute("tableName", className)));
     }
 
-    private void setDatabaseChangeLogAttributes() {
-        databaseChangeLog = new Element("databaseChangeLog");
-        //databaseChangeLog.setAttribute("xmlns","http://www.liquibase.org/xml/ns/dbchangelog");
-        //databaseChangeLog.setAttribute("xsi:schemaLocation","http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.4.xsd");
-        //databaseChangeLog.setAttribute("xmlns:xsi","http://www.liquibase.org/xml/ns/dbchangelog");
-    }
-
     private Element addColumn(Attribute... attributes) {
         Element element = new Element("column");
         stream(attributes).forEach(attribute ->
-                element.setAttribute(toLower(attribute.getName()),
+                element.setAttribute(Utils.toLower(attribute.getName()),
                         attribute.getName().equals("type") ?
-                                toLower(attribute.getValue()) :
+                                Utils.toLower(attribute.getValue()) :
                                 getValue(attribute.getValue())
                 )
         );
@@ -77,8 +77,12 @@ public class ChangeSet {
         return element;
     }
 
-    public Element addColumn(boolean notNull, Attribute... attributes) {
-        return notNull ? addColumn(attributes).addContent(addNotNullConstraint()) : addColumn(attributes);
+    private void addColumn(boolean notNull, Attribute... attributes) {
+        if (notNull) {
+            addColumn(attributes).addContent(addNotNullConstraint());
+        } else {
+            addColumn(attributes);
+        }
     }
 
     private Element addNotNullConstraint() {
@@ -86,7 +90,6 @@ public class ChangeSet {
     }
 
     private void addPk(Field field) {
-        String fieldName = getAttributeName(false, field);
         String tableName = getValue(field.getDeclaringClass().getSimpleName());
         String pkName = getValue(String.format("pk%s", field.getDeclaringClass().getSimpleName()));
 
@@ -95,7 +98,7 @@ public class ChangeSet {
                 .setAttribute("author", author)
                 .setContent(new Element("preConditions")
                         .setAttribute("onFail", "MARK_RAN")
-                        .setAttribute("onFailMessage", String.format("A %s já existe", pkName))
+                        .setAttribute("onFailMessage", String.format("A %s ja existe", pkName))
                         .setContent(new Element("not")
                                 .setContent(new Element("primaryKeyExists")
                                         .setAttribute("tableName", tableName)
@@ -115,8 +118,8 @@ public class ChangeSet {
         getClassToPkName(field, classToPkName);
 
         String classFromName = field.getDeclaringClass().getSimpleName();
-        String classToName = getLastValue(field.getType());
-        String fieldName = getJoinColumnName(true, field);
+        String classToName = Utils.getLastValue(field.getType());
+        String fieldName = getJoinColumnName(field);
 
         String fkName = getValue(String.format("fkId%s%s", classToName, classFromName));
         String baseColumnName = getValue(fieldName);
@@ -138,52 +141,25 @@ public class ChangeSet {
         );
     }
 
-    private String getJoinColumnName(boolean isUserData, Field field) {
-        if(fieldHaveJoinColumnAnnotation(field)){
-            return getFieldJoinColumnAnnotationName(field);
+    private String getJoinColumnName(Field field) {
+        if (fieldHaveJoinColumnAnnotation(field)) {
+            return Utils.getFieldJoinColumnAnnotationName(field);
         } else {
-            return getAttributeName(isUserData, field);
+            return getAttributeName(true, field);
         }
     }
 
     private String getAttributeName(boolean isUserData, Field field) {
-        if(fieldHaveColumnAnnotation(field)){
-            return getFieldColumnAnnotationName(field);
+        if (Utils.fieldHaveColumnAnnotation(field)) {
+            return Utils.getFieldColumnAnnotationName(field);
         } else {
             String name = isUserData ? String.format("id_%s", field.getName()) : field.getName();
-            checkMaxStringSize(name);
+            Utils.checkMaxStringSize(name);
             return name;
         }
     }
 
-    private String getFieldColumnAnnotationName(Field field) {
-        String name = field.getAnnotation(Column.class).name();
-        checkMaxStringSize(name);
-        return name;
-    }
-
-    public void createDatabaseColumns(boolean isUserData, Field[] fields) {
-        stream(fields).forEach(field -> {
-            Attribute[] attributes = {
-                    new Attribute("name", getAttributeName(isUserData, field)),
-                    new Attribute("type", getTypeName(isUserData, field))};
-            addColumn(isNotNull(field), attributes);
-            if (isUserData) addFk(field);
-            if (isPk(field)) addPk(field);
-        });
-    }
-
-    private boolean fieldHaveColumnAnnotation(Field field){
-        return field.getAnnotation(Column.class) != null;
-    }
-
-    private String getFieldJoinColumnAnnotationName(Field field) {
-        String name = field.getAnnotation(JoinColumn.class).name();
-        checkMaxStringSize(name);
-        return name;
-    }
-
-    private boolean fieldHaveJoinColumnAnnotation(Field field){
+    private boolean fieldHaveJoinColumnAnnotation(Field field) {
         return field.getAnnotation(JoinColumn.class) != null;
     }
 
@@ -191,7 +167,7 @@ public class ChangeSet {
         List<Field> pkFieldsWithAnnotationId = stream(field.getType().getDeclaredFields())
                 .filter(f -> f.getAnnotation(Id.class) != null)
                 .collect(Collectors.toList());
-        if(pkFieldsWithAnnotationId.size() == 1) {
+        if (pkFieldsWithAnnotationId.size() == 1) {
             classToPkName.set(pkFieldsWithAnnotationId.get(0).getName());
             return;
         }
@@ -201,7 +177,7 @@ public class ChangeSet {
     private Element getFKPreConditions(Field destination, String fkName) {
         return new Element("preConditions")
                 .setAttribute("onFail", "MARK_RAN")
-                .setAttribute("onFailMessage", String.format("A constraint %s já existe", fkName))
+                .setAttribute("onFailMessage", String.format("A constraint %s ja existe", fkName))
                 .setContent(new Element("not")
                         .setContent(new Element("foreignKeyConstraintExists")
                                 .setAttribute("foreignKeyName", fkName)
@@ -210,19 +186,12 @@ public class ChangeSet {
                 );
     }
 
-    private String getLastValue(Class<?> c) {
-        return stream(c.getName().split("\\.")).reduce((first, second) -> second).orElse(null);
-    }
-
-    private String toLower(String value) {
-        return value.toLowerCase();
-    }
 
     private String getValue(String value) {
         return addUnderscore(value).toUpperCase();
     }
 
-    public Document getXmlDocument() {
+    Document getXmlDocument() {
         listPk.forEach(pk -> databaseChangeLog.addContent(pk));
         listFk.forEach(fk -> databaseChangeLog.addContent(fk));
         doc.setRootElement(databaseChangeLog);
@@ -231,7 +200,7 @@ public class ChangeSet {
 
     private String addUnderscore(String currentString) {
         String separator = "_";
-        if(currentString.contains(separator)){
+        if (currentString.contains(separator) || currentString.isEmpty()) {
             return currentString;
         }
         StringBuilder newString = new StringBuilder();
@@ -251,34 +220,13 @@ public class ChangeSet {
         return newString.toString();
     }
 
-    private boolean isPk(Field field) {
-        return field.getAnnotation(Id.class) != null;
-    }
-
-    private boolean isNotNull(Field field) {
-        return field.getAnnotation(NotNull.class) == null;
-    }
 
     private String getTypeName(boolean isUserData, Field field) {
-        return isUserData ? "${numeric}" : Type.getPersonalizedType(field.getType());
-    }
-
-    private void checkMaxStringSize(String value) throws RuntimeException{
-        int max = 30;
-        if(value.length() > max){
-            throw new RuntimeException(
-                    String.format("Constraint %s excede o número máximo de caracteres" +
-                                    "\nTotal caracteres: %s" +
-                                    "\nMáximo permitido %s",
-                            value, value.length(), max));
-        }
+        return isUserData ? "${numeric}" : Type.getPersonalizedType(field);
     }
 
     public Element getDatabaseChangeLog() {
         return databaseChangeLog;
     }
 
-    public Document getDoc() {
-        return doc;
-    }
 }

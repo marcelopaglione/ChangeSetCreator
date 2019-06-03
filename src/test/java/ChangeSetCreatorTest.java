@@ -8,7 +8,8 @@ import org.junit.rules.ExpectedException;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.notNullValue;
 
 public class ChangeSetCreatorTest {
 
@@ -130,7 +131,32 @@ public class ChangeSetCreatorTest {
     }
 
     @Test
-    public void createVariableWithMoreThan30Characters() throws Exception{
+    public void maxLength() {
+        ChangeSetCreator changeSetCreator = new ChangeSetCreator();
+        changeSetCreator.create(MaxLength.class, "abc");
+        assertThat(changeSetCreator.getChangeSetList().size(), is(1));
+        Element databaseChangeLog = (Element) changeSetCreator.getChangeSetList().get("MaxLength").getContent().get(0);
+        assertThat(databaseChangeLog, notNullValue());
+        assertThat(databaseChangeLog.getContent(), hasSize(2));
+        Element createTable = (Element) ((Element) databaseChangeLog.getContent().get(0)).getContent().get(1);
+        assertThat(createTable.getContent(), hasSize(4));
+
+        assertThat(((Element) createTable.getContent().get(0)).getAttributes().get(0).getValue(), equalTo("ID"));
+        assertThat(((Element) createTable.getContent().get(0)).getAttributes().get(1).getValue(), equalTo("${numeric}"));
+
+        assertThat(((Element) createTable.getContent().get(1)).getAttributes().get(0).getValue(), equalTo("MAX_LENGTH_NOT_SET"));
+        assertThat(((Element) createTable.getContent().get(1)).getAttributes().get(1).getValue(), equalTo("varchar(your_size_here)"));
+
+        assertThat(((Element) createTable.getContent().get(2)).getAttributes().get(0).getValue(), equalTo("MAX_LENGTH_DEFAULT"));
+        assertThat(((Element) createTable.getContent().get(2)).getAttributes().get(1).getValue(), equalTo("varchar(255)"));
+
+        assertThat(((Element) createTable.getContent().get(3)).getAttributes().get(0).getValue(), equalTo("USER_DEFINED_MAX_LENGTH"));
+        assertThat(((Element) createTable.getContent().get(3)).getAttributes().get(1).getValue(), equalTo("varchar(50)"));
+
+    }
+
+    @Test
+    public void createVariableWithMoreThan30Characters() throws Exception {
         expectedEx.expect(RuntimeException.class);
         expectedEx.expectMessage("Constraint abcdefghijklmnopqrstuvwxyz1234567890 excede o número máximo de caracteres\n" +
                 "Total caracteres: 36\n" +

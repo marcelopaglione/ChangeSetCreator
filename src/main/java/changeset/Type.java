@@ -1,5 +1,7 @@
 package changeset;
 
+import javax.persistence.Column;
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashSet;
@@ -19,14 +21,24 @@ public class Type {
         userDatabaseDefinedTypes.add(Boolean.class);
     }
 
-    public static String getPersonalizedType(Class clazz) {
-        if (clazz == String.class) return "varchar(YOUR_SIZE_HERE)";
-        if (clazz == LocalDate.class) return "${data}";
-        if (clazz == BigDecimal.class || clazz == Long.class) return "${numeric}";
-        if (clazz == Boolean.class || clazz == boolean.class) return "varchar(1)";
+    public static String getPersonalizedType(Field field) {
+
+        if (field.getType() == String.class) {
+            if (Utils.isMaxLength(field)) {
+                return "varchar(" + field.getAnnotation(Column.class).length() + ")";
+            }
+            throw new RuntimeException(String.format(
+                    "Size not defined for field %s at Table %s\nSuggestion: Add annotation @Column(length = 25)",
+                    field.getName(), field.getDeclaringClass().getName())
+            );
+        }
+        if (field.getType() == LocalDate.class) return "${data}";
+        if (field.getType() == BigDecimal.class || field.getType() == Long.class) return "${numeric}";
+        if (field.getType() == Boolean.class || field.getType() == boolean.class) return "varchar(1)";
 
         return "non-defined";
     }
+
 
     public static boolean isPersonalizedType(Class<?> clazz) {
         return getUserDatabaseDefinedTypes().contains(clazz);
